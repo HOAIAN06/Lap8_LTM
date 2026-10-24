@@ -2,16 +2,19 @@ package com.warehouse.server.service;
 
 import com.warehouse.common.dto.LoginResult;
 import com.warehouse.common.dto.ProductInput;
+import com.warehouse.common.dto.RegistrationResult;
 import com.warehouse.common.model.InventoryTransaction;
 import com.warehouse.common.model.Product;
+import com.warehouse.common.rmi.RmiNames;
+import com.warehouse.common.rmi.SyncService;
 import com.warehouse.common.rmi.WarehouseService;
 import com.warehouse.common.exception.WarehouseException;
 import com.warehouse.common.rmi.LockService;
 import com.warehouse.server.dao.ProductRepository;
-import com.warehouse.server.sync.SyncPayloadCodec;
 import com.warehouse.server.sync.SyncValues;
 
 import java.rmi.RemoteException;
+import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.sql.*;
@@ -19,22 +22,36 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.logging.Logger;
 
 public final class WarehouseServiceImpl extends UnicastRemoteObject implements WarehouseService {
+    private static final Logger LOG = Logger.getLogger(WarehouseServiceImpl.class.getName());
+
     private final javax.sql.DataSource dataSource;
     private final ProductRepository products;
     private final LockService lockManager;
     private final String serverId;
-    private final Registry peerRegistry;
+    private final String peerHost;
+    private final int peerPort;
+    private volatile Registry peerRegistry;
 
     public WarehouseServiceImpl(javax.sql.DataSource dataSource, LockService lockManager,
                                 String serverId, int servicePort, Registry peerRegistry)
+            throws RemoteException {
+        this(dataSource, lockManager, serverId, servicePort, null, 0, peerRegistry);
+    }
+
+    public WarehouseServiceImpl(javax.sql.DataSource dataSource, LockService lockManager,
+                                String serverId, int servicePort,
+                                String peerHost, int peerPort, Registry peerRegistry)
             throws RemoteException {
         super(servicePort);
         this.dataSource = dataSource;
         this.products = new ProductRepository(dataSource);
         this.lockManager = lockManager;
         this.serverId = SyncValues.origin(serverId);
+        this.peerHost = peerHost;
+        this.peerPort = peerPort;
         this.peerRegistry = peerRegistry;
     }
 
@@ -67,6 +84,41 @@ public final class WarehouseServiceImpl extends UnicastRemoteObject implements W
     }
 
     @Override
+    public RegistrationResult register(String username, String password, String fullName)
+            throws RemoteException {
+        String selectedUsername = username == null ? "" : username.trim();
+        String selectedFullName = fullName == null ? "" : fullName.trim();
+        if (selectedUsername.isEmpty() || password == null || password.isEmpty()
+                || selectedFullName.isEmpty()) {
+            return new RegistrationResult(false, selectedUsername,
+                    "Vui lòng nhập đầy đủ username, họ tên và mật khẩu.");
+        }
+        if (selectedUsername.length() > 100 || selectedFullName.length() > 255
+                || password.length() > 255) {
+            return new RegistrationResult(false, selectedUsername,
+                    "Tài khoản, họ tên hoặc mật khẩu vượt quá độ dài cho phép.");
+        }
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "INSERT INTO users(id,username,password,full_name,role,is_active,created_at) "
+                             + "VALUES (?,?,?,?, 'STAFF', 1, NOW(3))")) {
+            ps.setString(1, UUID.randomUUID().toString());
+            ps.setString(2, selectedUsername);
+            ps.setString(3, password);
+            ps.setString(4, selectedFullName);
+            ps.executeUpdate();
+            return new RegistrationResult(true, selectedUsername,
+                    "Đăng ký thành công. Bạn có thể đăng nhập.");
+        } catch (SQLException e) {
+            if (isDuplicateKey(e)) {
+                return new RegistrationResult(false, selectedUsername,
+                        "Username đã tồn tại. Vui lòng chọn username khác.");
+            }
+            throw new WarehouseException("Không thể đăng ký tài khoản do lỗi cơ sở dữ liệu.", e);
+        }
+    }
+
+    @Override
     public List<Product> listProducts(String search) throws RemoteException {
         try {
             return products.findAll(search);
@@ -82,7 +134,8 @@ public final class WarehouseServiceImpl extends UnicastRemoteObject implements W
             c.setAutoCommit(false);
             try {
                 Product product = products.insert(c, input);
-                writeEvent(c, product.id(), "INSERT", null);
+                SyncService peerSync = requirePeerSync();
+                peerSync.syncCreateProduct(product);
                 c.commit();
                 return product;
             } catch (SQLException e) {
@@ -90,6 +143,15 @@ public final class WarehouseServiceImpl extends UnicastRemoteObject implements W
                 if (isDuplicateKey(e)) {
                     throw new WarehouseException("Mã sản phẩm đã tồn tại.");
                 }
+                throw e;
+            } catch (WarehouseException e) {
+                c.rollback();
+                throw e;
+            } catch (RemoteException e) {
+                c.rollback();
+                throw new WarehouseException("Không thể cập nhật dữ liệu vì Server còn lại đang mất kết nối.", e);
+            } catch (Exception e) {
+                c.rollback();
                 throw e;
             }
         } catch (SQLException e) {
@@ -107,10 +169,17 @@ public final class WarehouseServiceImpl extends UnicastRemoteObject implements W
             try {
                 Product product = products.update(c, id, input, fencingToken);
                 if (product == null) throw new WarehouseException("Không tìm thấy sản phẩm.");
-                writeEvent(c, id, "UPDATE", null);
+                SyncService peerSync = requirePeerSync();
+                peerSync.syncUpdateProduct(product);
                 c.commit();
                 return product;
-            } catch (SQLException | WarehouseException | RuntimeException e) {
+            } catch (SQLException | WarehouseException e) {
+                c.rollback();
+                throw e;
+            } catch (RemoteException e) {
+                c.rollback();
+                throw new WarehouseException("Không thể cập nhật dữ liệu vì Server còn lại đang mất kết nối.", e);
+            } catch (Exception e) {
                 c.rollback();
                 throw e;
             }
@@ -127,9 +196,16 @@ public final class WarehouseServiceImpl extends UnicastRemoteObject implements W
             c.setAutoCommit(false);
             try {
                 products.softDelete(c, id, fencingToken);
-                writeEvent(c, id, "DELETE", null);
+                SyncService peerSync = requirePeerSync();
+                peerSync.syncDeleteProduct(id, fencingToken);
                 c.commit();
-            } catch (SQLException | RuntimeException e) {
+            } catch (SQLException | WarehouseException e) {
+                c.rollback();
+                throw e;
+            } catch (RemoteException e) {
+                c.rollback();
+                throw new WarehouseException("Không thể cập nhật dữ liệu vì Server còn lại đang mất kết nối.", e);
+            } catch (Exception e) {
                 c.rollback();
                 throw e;
             }
@@ -181,10 +257,17 @@ public final class WarehouseServiceImpl extends UnicastRemoteObject implements W
                     ps.setString(8, userId.toString());
                     ps.executeUpdate();
                 }
-                writeEvent(c, id, SyncValues.transactionType(importing), result.id());
+                SyncService peerSync = requirePeerSync();
+                peerSync.syncInventory(id, after, fencingToken, result);
                 c.commit();
                 return result;
-            } catch (SQLException | WarehouseException | RuntimeException e) {
+            } catch (SQLException | WarehouseException e) {
+                c.rollback();
+                throw e;
+            } catch (RemoteException e) {
+                c.rollback();
+                throw new WarehouseException("Không thể cập nhật dữ liệu vì Server còn lại đang mất kết nối.", e);
+            } catch (Exception e) {
                 c.rollback();
                 throw e;
             }
@@ -216,12 +299,44 @@ public final class WarehouseServiceImpl extends UnicastRemoteObject implements W
 
     @Override
     public boolean isPeerAvailable() {
-        if (peerRegistry == null) return false;
         try {
-            peerRegistry.lookup(com.warehouse.common.rmi.RmiNames.SYNC);
-            return true;
+            SyncService peer = getPeerSync();
+            return peer != null && peer.ping();
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    public void setPeerRegistry(Registry peerRegistry) {
+        this.peerRegistry = peerRegistry;
+    }
+
+    private SyncService getPeerSync() {
+        try {
+            Registry reg = this.peerRegistry;
+            if (reg == null && peerHost != null && !peerHost.isBlank() && peerPort > 0) {
+                reg = LocateRegistry.getRegistry(peerHost, peerPort);
+            }
+            if (reg != null) {
+                return (SyncService) reg.lookup(RmiNames.SYNC);
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private SyncService requirePeerSync() throws WarehouseException {
+        SyncService peer = getPeerSync();
+        if (peer == null) {
+            throw new WarehouseException("Không thể cập nhật dữ liệu vì Server còn lại đang mất kết nối.");
+        }
+        try {
+            if (!peer.ping()) {
+                throw new WarehouseException("Không thể cập nhật dữ liệu vì Server còn lại đang mất kết nối.");
+            }
+            return peer;
+        } catch (RemoteException e) {
+            throw new WarehouseException("Không thể cập nhật dữ liệu vì Server còn lại đang mất kết nối.", e);
         }
     }
 
@@ -261,31 +376,6 @@ public final class WarehouseServiceImpl extends UnicastRemoteObject implements W
                 if (!row.next()) throw new WarehouseException("Tài khoản không tồn tại hoặc đã bị khóa.");
                 return UUID.fromString(row.getString(1));
             }
-        }
-    }
-
-    private void writeEvent(Connection c, UUID entityId, String action, UUID transactionId) throws SQLException {
-        String normalizedAction = SyncValues.action(action);
-        String payload = SyncPayloadCodec.fromDatabase(c, entityId, transactionId);
-        long version;
-        try (PreparedStatement read = c.prepareStatement("SELECT version FROM products WHERE id=?")) {
-            read.setString(1, entityId.toString());
-            try (ResultSet row = read.executeQuery()) {
-                if (!row.next()) throw new SQLException("Product missing before outbox insert");
-                version = row.getLong(1);
-            }
-        }
-        try (PreparedStatement insert = c.prepareStatement(
-                "INSERT INTO sync_events(event_id,origin_server,entity_type,entity_id,action,payload,entity_version,sync_status) "
-                        + "VALUES (?,?,?,?,?,?,?,'PENDING')")) {
-            insert.setString(1, UUID.randomUUID().toString());
-            insert.setString(2, serverId);
-            insert.setString(3, "PRODUCT");
-            insert.setString(4, entityId.toString());
-            insert.setString(5, normalizedAction);
-            insert.setString(6, payload);
-            insert.setLong(7, version);
-            insert.executeUpdate();
         }
     }
 }

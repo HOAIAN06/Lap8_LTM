@@ -2,6 +2,7 @@ package com.warehouse.client.ui;
 
 import com.warehouse.client.rmi.WarehouseClient;
 import com.warehouse.common.dto.LoginResult;
+import com.warehouse.common.dto.RegistrationResult;
 
 import javax.swing.*;
 import java.awt.*;
@@ -10,9 +11,10 @@ public final class LoginFrame extends JFrame {
     private final WarehouseClient client;
     private final String clientId;
     private final JTextField username = new JTextField(18);
-    private final JTextField password = new JTextField(18);
+    private final JPasswordField password = new JPasswordField(18);
     private final JLabel status = new JLabel("Nhập tài khoản và mật khẩu của nhân viên.");
     private final JButton login = new JButton("Đăng nhập");
+    private final JButton register = new JButton("Đăng ký tài khoản");
 
     public LoginFrame(WarehouseClient client, String clientId, String defaultUsername) {
         super("Đăng nhập - Distributed Warehouse");
@@ -42,9 +44,13 @@ public final class LoginFrame extends JFrame {
         login.setPreferredSize(new Dimension(150, 36));
         form.add(login, c);
         c.gridy = 5;
+        register.setPreferredSize(new Dimension(180, 32));
+        form.add(register, c);
+        c.gridy = 6;
         status.setForeground(new Color(90, 100, 110));
         form.add(status, c);
         login.addActionListener(e -> authenticate());
+        register.addActionListener(e -> registerAccount());
         username.addActionListener(e -> authenticate());
         password.addActionListener(e -> authenticate());
         getRootPane().setDefaultButton(login);
@@ -55,7 +61,7 @@ public final class LoginFrame extends JFrame {
 
     private void authenticate() {
         String user = username.getText().trim();
-        String pass = password.getText();
+        String pass = new String(password.getPassword());
         if (user.isEmpty() || pass.isEmpty()) {
             status.setText("Vui lòng nhập username và mật khẩu.");
             return;
@@ -80,6 +86,52 @@ public final class LoginFrame extends JFrame {
                     new DashboardFrame(client, clientId, result.username()).setVisible(true);
                 } catch (Exception ex) {
                     status.setText("Không thể đăng nhập: " + ex.getMessage());
+                }
+            }
+        }.execute();
+    }
+
+    private void registerAccount() {
+        JTextField name = new JTextField(18);
+        JTextField user = new JTextField(username.getText().trim(), 18);
+        JPasswordField pass = new JPasswordField(18);
+        JPasswordField confirm = new JPasswordField(18);
+        JPanel fields = new JPanel(new GridLayout(0, 2, 8, 8));
+        fields.add(new JLabel("Họ và tên:")); fields.add(name);
+        fields.add(new JLabel("Username:")); fields.add(user);
+        fields.add(new JLabel("Mật khẩu:")); fields.add(pass);
+        fields.add(new JLabel("Nhập lại mật khẩu:")); fields.add(confirm);
+        if (JOptionPane.showConfirmDialog(this, fields, "Đăng ký tài khoản",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) {
+            return;
+        }
+        String fullName = name.getText().trim();
+        String selectedUsername = user.getText().trim();
+        String selectedPassword = new String(pass.getPassword());
+        if (!selectedPassword.equals(new String(confirm.getPassword()))) {
+            status.setText("Mật khẩu nhập lại không khớp.");
+            return;
+        }
+        register.setEnabled(false);
+        login.setEnabled(false);
+        status.setText("Đang đăng ký tài khoản...");
+        new SwingWorker<RegistrationResult, Void>() {
+            @Override protected RegistrationResult doInBackground() throws Exception {
+                return client.warehouse().register(selectedUsername, selectedPassword, fullName);
+            }
+
+            @Override protected void done() {
+                register.setEnabled(true);
+                login.setEnabled(true);
+                try {
+                    RegistrationResult result = get();
+                    status.setText(result.message());
+                    if (result.registered()) {
+                        username.setText(result.username());
+                        password.setText("");
+                    }
+                } catch (Exception ex) {
+                    status.setText("Không thể đăng ký: " + ex.getMessage());
                 }
             }
         }.execute();

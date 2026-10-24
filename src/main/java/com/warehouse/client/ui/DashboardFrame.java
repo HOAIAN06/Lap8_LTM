@@ -7,18 +7,29 @@ import com.warehouse.common.model.InventoryTransaction;
 import com.warehouse.common.model.Product;
 
 import javax.swing.*;
+import javax.swing.plaf.basic.BasicSplitPaneDivider;
+import javax.swing.plaf.basic.BasicSplitPaneUI;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.*;
 import java.math.BigDecimal;
+import java.text.NumberFormat;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 public final class DashboardFrame extends JFrame {
+    private static final Color BACKGROUND = new Color(245, 248, 251);
+    private static final Color WHITE = Color.WHITE;
+    private static final Color INK = new Color(27, 47, 68);
+    private static final Color MUTED = new Color(112, 132, 152);
+    private static final Color BORDER = new Color(211, 223, 232);
+    private static final Color TEAL = new Color(15, 139, 132);
     private final WarehouseClient client;
     private final String clientId;
     private final String username;
@@ -32,18 +43,16 @@ public final class DashboardFrame extends JFrame {
     private final JLabel peerStatus = new JLabel("Server còn lại: đang kiểm tra...");
     private final JLabel productTitle = new JLabel("Chưa chọn sản phẩm");
     private final JLabel productDetails = new JLabel("Chọn một dòng trong bảng.");
-    private final JLabel lockStatus = new JLabel("Khóa của bạn: chưa có");
-    private final JButton lockButton = new JButton("Khóa sản phẩm");
-    private final JButton releaseButton = new JButton("Giải phóng khóa");
-    private final JButton editButton = new JButton("Sửa sản phẩm");
-    private final JButton importButton = new JButton("Nhập kho");
-    private final JButton exportButton = new JButton("Xuất kho");
-    private final JButton deleteButton = new JButton("Xóa sản phẩm");
-    private final JButton historyButton = new JButton("Lịch sử nhập / xuất");
-    private final JButton addButton = new JButton("+ Thêm sản phẩm");
+    private final JButton editButton = new AppButton("Sửa sản phẩm", false);
+    private final JButton importButton = new AppButton("Nhập kho", false);
+    private final JButton exportButton = new AppButton("Xuất kho", false);
+    private final JButton deleteButton = new AppButton("Xóa sản phẩm", false);
+    private final JButton historyButton = new AppButton("Lịch sử nhập / xuất", false);
+    private final JButton addButton = new AppButton("+ Thêm sản phẩm", true);
     private final Timer heartbeatTimer;
     private List<Product> products = List.of();
     private LockLease currentLease;
+    private UUID activeWriteProductId;
     private boolean busy;
     private boolean heartbeatRunning;
 
@@ -93,65 +102,121 @@ public final class DashboardFrame extends JFrame {
     }
 
     private void buildUi() {
-        JPanel root = new JPanel(new BorderLayout(12, 12));
-        root.setBorder(BorderFactory.createEmptyBorder(16, 18, 12, 18));
+        JPanel root = new JPanel(new BorderLayout(0, 18));
+        root.setBackground(BACKGROUND);
+        root.setBorder(BorderFactory.createEmptyBorder(24, 26, 16, 26));
         JLabel title = new JLabel("Quản lý kho hàng");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 23f));
-        JPanel heading = new JPanel(new BorderLayout(8, 5));
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 25f));
+        title.setForeground(INK);
+        JPanel heading = new JPanel(new BorderLayout(0, 5));
+        heading.setOpaque(false);
         heading.add(title, BorderLayout.NORTH);
-        heading.add(new JLabel("Nhân viên: " + username + "    |    Client: " + clientId), BorderLayout.SOUTH);
+        JLabel identity = new JLabel("Nhân viên " + username + "   ·   Client " + clientId);
+        identity.setForeground(MUTED);
+        heading.add(identity, BorderLayout.SOUTH);
         root.add(heading, BorderLayout.NORTH);
 
-        table.setRowHeight(32);
+        table.setRowHeight(40);
         table.setAutoCreateRowSorter(true);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         table.getTableHeader().setReorderingAllowed(false);
         table.setFillsViewportHeight(true);
+        table.setShowGrid(false);
+        table.setIntercellSpacing(new Dimension(0, 0));
+        table.setSelectionBackground(new Color(224, 244, 241));
+        table.setSelectionForeground(INK);
+        table.setFont(table.getFont().deriveFont(13f));
+        table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
+            private final NumberFormat prices = NumberFormat.getNumberInstance(Locale.forLanguageTag("vi-VN"));
+
+            @Override public Component getTableCellRendererComponent(JTable grid, Object value,
+                    boolean selected, boolean focused, int row, int column) {
+                super.getTableCellRendererComponent(grid, value, selected, focused, row, column);
+                if (column == 3 && value instanceof BigDecimal price) setText(prices.format(price));
+                setBackground(selected ? grid.getSelectionBackground()
+                        : row % 2 == 0 ? WHITE : new Color(250, 252, 253));
+                setForeground(INK);
+                setBorder(BorderFactory.createEmptyBorder(0, 12, 0, 12));
+                setHorizontalAlignment(column >= 3 ? SwingConstants.RIGHT : SwingConstants.LEFT);
+                return this;
+            }
+        });
+        table.getTableHeader().setPreferredSize(new Dimension(0, 42));
+        table.getTableHeader().setBackground(new Color(239, 245, 248));
+        table.getTableHeader().setForeground(INK);
+        table.getTableHeader().setFont(table.getTableHeader().getFont().deriveFont(Font.BOLD, 12f));
+        table.getColumnModel().getColumn(0).setPreferredWidth(90);
+        table.getColumnModel().getColumn(1).setPreferredWidth(245);
+        table.getColumnModel().getColumn(2).setPreferredWidth(145);
+        table.getColumnModel().getColumn(3).setPreferredWidth(120);
+        table.getColumnModel().getColumn(4).setPreferredWidth(85);
         table.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) updateSelection();
         });
-        JPanel searchBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        JButton find = new JButton("Tìm");
-        JButton refresh = new JButton("Làm mới");
-        searchBar.add(new JLabel("Mã hoặc tên:"));
-        searchBar.add(search);
-        searchBar.add(find);
-        searchBar.add(refresh);
-        searchBar.add(addButton);
+        JPanel searchBar = new JPanel(new BorderLayout(12, 0));
+        searchBar.setOpaque(false);
+        searchBar.setBorder(BorderFactory.createEmptyBorder(0, 0, 14, 0));
+        JButton find = new AppButton("Tìm", false);
+        JButton refresh = new AppButton("Làm mới", false);
+        search.setFont(search.getFont().deriveFont(14f));
+        search.setForeground(INK);
+        search.setBackground(WHITE);
+        search.setPreferredSize(new Dimension(230, 40));
+        search.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(BORDER),
+                BorderFactory.createEmptyBorder(7, 11, 7, 11)));
+        JPanel searchControls = new JPanel(new BorderLayout(8, 0));
+        searchControls.setOpaque(false);
+        JLabel searchLabel = new JLabel("Mã hoặc tên");
+        searchLabel.setForeground(MUTED);
+        searchControls.add(searchLabel, BorderLayout.WEST);
+        searchControls.add(search, BorderLayout.CENTER);
+        JPanel searchButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        searchButtons.setOpaque(false);
+        searchButtons.add(find);
+        searchButtons.add(refresh);
+        searchControls.add(searchButtons, BorderLayout.EAST);
+        searchBar.add(searchControls, BorderLayout.CENTER);
+        searchBar.add(addButton, BorderLayout.EAST);
         search.addActionListener(e -> loadProducts());
         find.addActionListener(e -> loadProducts());
         refresh.addActionListener(e -> { search.setText(""); loadProducts(); refreshPeer(); });
         addButton.addActionListener(e -> createProduct());
-        JPanel list = new JPanel(new BorderLayout(0, 10));
+        JPanel list = card();
+        list.setLayout(new BorderLayout(0, 0));
         list.add(searchBar, BorderLayout.NORTH);
-        list.add(new JScrollPane(table), BorderLayout.CENTER);
+        JScrollPane tablePane = new JScrollPane(table);
+        tablePane.setBorder(BorderFactory.createLineBorder(BORDER));
+        tablePane.getViewport().setBackground(WHITE);
+        list.add(tablePane, BorderLayout.CENTER);
 
-        JPanel actions = new JPanel();
+        JPanel actions = card();
         actions.setLayout(new BoxLayout(actions, BoxLayout.Y_AXIS));
-        actions.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder("Sản phẩm đã chọn"),
-                BorderFactory.createEmptyBorder(10, 12, 10, 12)));
+        actions.setPreferredSize(new Dimension(282, 0));
+        JLabel sectionTitle = new JLabel("SẢN PHẨM ĐÃ CHỌN");
+        sectionTitle.setFont(sectionTitle.getFont().deriveFont(Font.BOLD, 11f));
+        sectionTitle.setForeground(MUTED);
+        sectionTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        actions.add(sectionTitle);
+        actions.add(Box.createVerticalStrut(14));
         productTitle.setFont(productTitle.getFont().deriveFont(Font.BOLD, 17f));
-        for (JComponent component : new JComponent[]{productTitle, productDetails, lockStatus}) {
+        productTitle.setForeground(INK);
+        productDetails.setForeground(MUTED);
+        for (JComponent component : new JComponent[]{productTitle, productDetails}) {
             component.setAlignmentX(Component.LEFT_ALIGNMENT);
             actions.add(component);
-            actions.add(Box.createVerticalStrut(9));
+            actions.add(Box.createVerticalStrut(8));
         }
+        actions.add(Box.createVerticalStrut(8));
         actions.add(new JSeparator());
-        actions.add(Box.createVerticalStrut(11));
-        for (JButton button : new JButton[]{lockButton, releaseButton, editButton, importButton,
+        actions.add(Box.createVerticalStrut(20));
+        for (JButton button : new JButton[]{editButton, importButton,
                 exportButton, historyButton, deleteButton}) {
             button.setAlignmentX(Component.LEFT_ALIGNMENT);
-            button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
+            button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
             actions.add(button);
-            actions.add(Box.createVerticalStrut(7));
+            actions.add(Box.createVerticalStrut(10));
         }
-        JLabel hint = new JLabel("<html>Để sửa, nhập, xuất hoặc xóa:<br>chọn sản phẩm → khóa → thao tác.</html>");
-        hint.setAlignmentX(Component.LEFT_ALIGNMENT);
-        actions.add(Box.createVerticalStrut(10));
-        actions.add(hint);
-        lockButton.addActionListener(e -> acquireLock());
-        releaseButton.addActionListener(e -> releaseLock());
         editButton.addActionListener(e -> editProduct());
         importButton.addActionListener(e -> changeInventory(true));
         exportButton.addActionListener(e -> changeInventory(false));
@@ -159,17 +224,41 @@ public final class DashboardFrame extends JFrame {
         deleteButton.addActionListener(e -> deleteProduct());
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, list, actions);
         split.setResizeWeight(1.0);
-        split.setDividerLocation(800);
+        split.setDividerLocation(790);
+        split.setDividerSize(16);
         split.setBorder(null);
+        split.setOpaque(false);
+        split.setUI(new BasicSplitPaneUI() {
+            @Override public BasicSplitPaneDivider createDefaultDivider() {
+                return new BasicSplitPaneDivider(this) {
+                    @Override public void paint(Graphics graphics) {
+                        graphics.setColor(BACKGROUND);
+                        graphics.fillRect(0, 0, getWidth(), getHeight());
+                    }
+                };
+            }
+        });
         root.add(split, BorderLayout.CENTER);
 
         JPanel footer = new JPanel(new BorderLayout());
-        footer.setBorder(BorderFactory.createEmptyBorder(5, 0, 0, 0));
+        footer.setOpaque(false);
+        footer.setBorder(BorderFactory.createEmptyBorder(2, 2, 0, 2));
+        status.setForeground(MUTED);
+        peerStatus.setForeground(MUTED);
         footer.add(status, BorderLayout.WEST);
         footer.add(peerStatus, BorderLayout.EAST);
         root.add(footer, BorderLayout.SOUTH);
         setContentPane(root);
         updateSelection();
+    }
+
+    private static JPanel card() {
+        JPanel panel = new JPanel();
+        panel.setBackground(WHITE);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(BORDER),
+                BorderFactory.createEmptyBorder(18, 18, 18, 18)));
+        return panel;
     }
 
     private void loadProducts() {
@@ -222,28 +311,6 @@ public final class DashboardFrame extends JFrame {
         }.execute();
     }
 
-    private void acquireLock() {
-        Product product = selectedProduct();
-        if (product == null) return;
-        runRemote("Đang xin khóa " + product.productCode() + "...",
-                () -> client.locks().acquire(product.id(), clientId), lease -> {
-                    currentLease = lease;
-                    status.setText("Đã khóa " + product.productCode() + ". Có thể thao tác.");
-                });
-    }
-
-    private void releaseLock() {
-        LockLease lease = currentLease;
-        if (lease == null) return;
-        runRemote("Đang giải phóng khóa...", () -> {
-            client.locks().release(lease.lockToken(), clientId);
-            return null;
-        }, ignored -> {
-            if (currentLease == lease) currentLease = null;
-            status.setText("Đã giải phóng khóa.");
-        });
-    }
-
     private void renewLease() {
         LockLease lease = currentLease;
         if (lease == null || heartbeatRunning) return;
@@ -258,7 +325,8 @@ public final class DashboardFrame extends JFrame {
                 try { currentLease = get(); updateSelection(); }
                 catch (Exception ex) {
                     currentLease = null;
-                    status.setText("Khóa đã hết hạn hoặc mất kết nối. Hãy khóa lại.");
+                    activeWriteProductId = null;
+                    status.setText("Phiên thao tác đã hết hạn hoặc mất kết nối. Vui lòng thử lại.");
                     updateSelection();
                 }
             }
@@ -274,70 +342,65 @@ public final class DashboardFrame extends JFrame {
 
     private void editProduct() {
         Product product = selectedProduct();
-        LockLease lease = leaseFor(product);
-        if (lease == null) return;
-        ProductInput input = productInput("Sửa " + product.productCode(), product);
-        if (input == null) return;
-        runRemote("Đang lưu sản phẩm...", () -> client.warehouse().updateProduct(product.id(), input,
-                lease.lockToken(), lease.fencingToken(), clientId, username),
-                updated -> { status.setText("Đã lưu " + updated.productCode() + "."); loadProducts(); });
+        withWriteLock(product, lease -> {
+            ProductInput input = productInput("Sửa " + product.productCode(), product);
+            if (input == null) {
+                releaseAfterCancel(lease);
+                return;
+            }
+            runWrite("Đang lưu sản phẩm...", lease,
+                    () -> client.warehouse().updateProduct(product.id(), input,
+                            lease.lockToken(), lease.fencingToken(), clientId, username),
+                    updated -> { status.setText("Đã lưu " + updated.productCode() + "."); loadProducts(); });
+        });
     }
 
     private void changeInventory(boolean importing) {
         Product product = selectedProduct();
-        LockLease lease = leaseFor(product);
-        if (lease == null) return;
-        String value = JOptionPane.showInputDialog(this,
-                (importing ? "Nhập kho" : "Xuất kho") + " - " + product.productCode()
-                        + "\nTồn kho hiện tại: " + product.quantity() + "\nSố lượng:");
-        if (value == null) return;
-        int quantity;
-        try {
-            quantity = Integer.parseInt(value.trim());
-            if (quantity <= 0) throw new NumberFormatException();
-        } catch (NumberFormatException ex) {
-            JOptionPane.showMessageDialog(this, "Nhập số nguyên lớn hơn 0.", "Số lượng không hợp lệ",
-                    JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-        if (!importing && quantity > product.quantity()) {
-            JOptionPane.showMessageDialog(this, "Số lượng xuất vượt tồn kho hiện tại.",
-                    "Không thể xuất kho", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-        runRemote(importing ? "Đang nhập kho..." : "Đang xuất kho...",
-                () -> client.warehouse().changeInventory(product.id(), quantity, importing,
-                        lease.lockToken(), lease.fencingToken(), clientId, username),
-                transaction -> { status.setText("Tồn kho mới: " + transaction.quantityAfter() + "."); loadProducts(); });
+        withWriteLock(product, lease -> {
+            String value = JOptionPane.showInputDialog(this,
+                    (importing ? "Nhập kho" : "Xuất kho") + " - " + product.productCode()
+                            + "\nTồn kho hiện tại: " + product.quantity() + "\nSố lượng:");
+            if (value == null) {
+                releaseAfterCancel(lease);
+                return;
+            }
+            int quantity;
+            try {
+                quantity = Integer.parseInt(value.trim());
+                if (quantity <= 0) throw new NumberFormatException();
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(this, "Nhập số nguyên lớn hơn 0.", "Số lượng không hợp lệ",
+                        JOptionPane.WARNING_MESSAGE);
+                releaseAfterCancel(lease);
+                return;
+            }
+            if (!importing && quantity > product.quantity()) {
+                JOptionPane.showMessageDialog(this, "Số lượng xuất vượt tồn kho hiện tại.",
+                        "Không thể xuất kho", JOptionPane.WARNING_MESSAGE);
+                releaseAfterCancel(lease);
+                return;
+            }
+            runWrite(importing ? "Đang nhập kho..." : "Đang xuất kho...", lease,
+                    () -> client.warehouse().changeInventory(product.id(), quantity, importing,
+                            lease.lockToken(), lease.fencingToken(), clientId, username),
+                    transaction -> { status.setText("Tồn kho mới: " + transaction.quantityAfter() + "."); loadProducts(); });
+        });
     }
 
     private void deleteProduct() {
         Product product = selectedProduct();
-        LockLease lease = leaseFor(product);
-        if (lease == null) return;
-        if (JOptionPane.showConfirmDialog(this, "Xóa sản phẩm " + product.productCode() + "?",
-                "Xác nhận xóa mềm", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
-                != JOptionPane.YES_OPTION) return;
-        runRemote("Đang xóa sản phẩm...", () -> {
-            client.warehouse().deleteProduct(product.id(), lease.lockToken(), lease.fencingToken(), clientId, username);
-            boolean released = false;
-            try {
-                client.locks().release(lease.lockToken(), clientId);
-                released = true;
-            } catch (Exception ignored) {
-                // Thao tác xóa đã hoàn tất trên server, nếu release lỗi thì lease sẽ tự hủy qua TTL
+        withWriteLock(product, lease -> {
+            if (JOptionPane.showConfirmDialog(this, "Xóa sản phẩm " + product.productCode() + "?",
+                    "Xác nhận xóa mềm", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
+                    != JOptionPane.YES_OPTION) {
+                releaseAfterCancel(lease);
+                return;
             }
-            return released;
-        }, released -> {
-            if (currentLease == lease) {
-                currentLease = null;
-            }
-            if (Boolean.TRUE.equals(released)) {
-                status.setText("Đã xóa " + product.productCode() + " và giải phóng khóa.");
-            } else {
-                status.setText("Đã xóa " + product.productCode() + " (khóa sẽ tự hết hạn theo TTL).");
-            }
-            loadProducts();
+            runWrite("Đang xóa sản phẩm...", lease, () -> {
+                client.warehouse().deleteProduct(product.id(), lease.lockToken(), lease.fencingToken(), clientId, username);
+                return null;
+            }, ignored -> { status.setText("Đã xóa " + product.productCode() + "."); loadProducts(); });
         });
     }
 
@@ -412,43 +475,137 @@ public final class DashboardFrame extends JFrame {
         return product == null ? null : product.id();
     }
 
-    private LockLease leaseFor(Product product) {
-        if (product != null && currentLease != null && currentLease.resourceId().equals(product.id())) {
-            return currentLease;
+    private void withWriteLock(Product product, java.util.function.Consumer<LockLease> action) {
+        if (product == null || busy || activeWriteProductId != null) return;
+        if (currentLease != null && !currentLease.resourceId().equals(product.id())) {
+            JOptionPane.showMessageDialog(this, "Đang có một thao tác khác chưa hoàn tất.",
+                    "Không thể thực hiện", JOptionPane.INFORMATION_MESSAGE);
+            return;
         }
-        JOptionPane.showMessageDialog(this, "Hãy khóa sản phẩm này trước khi thao tác.",
-                "Cần khóa", JOptionPane.INFORMATION_MESSAGE);
-        return null;
+        if (currentLease != null) {
+            activeWriteProductId = product.id();
+            updateSelection();
+            action.accept(currentLease);
+            return;
+        }
+        busy = true;
+        status.setText("Đang kiểm tra sản phẩm " + product.productCode() + "...");
+        updateSelection();
+        new SwingWorker<LockLease, Void>() {
+            @Override protected LockLease doInBackground() throws Exception {
+                return client.locks().acquire(product.id(), clientId);
+            }
+            @Override protected void done() {
+                busy = false;
+                try {
+                    currentLease = get();
+                    activeWriteProductId = product.id();
+                    updateSelection();
+                    action.accept(currentLease);
+                } catch (Exception ex) {
+                    showError(ex);
+                    updateSelection();
+                }
+            }
+        }.execute();
+    }
+
+    private void releaseAfterCancel(LockLease lease) {
+        busy = true;
+        status.setText("Đang hoàn tất thao tác...");
+        updateSelection();
+        new SwingWorker<Boolean, Void>() {
+            @Override protected Boolean doInBackground() {
+                return releaseLease(lease);
+            }
+            @Override protected void done() {
+                busy = false;
+                clearLease(lease);
+                status.setText(Boolean.TRUE.equals(getQuietly())
+                        ? "Đã hủy thao tác."
+                        : "Đã hủy thao tác; phiên sẽ tự hết hạn sau một thời gian.");
+                updateSelection();
+            }
+
+            private Boolean getQuietly() {
+                try {
+                    return get();
+                } catch (Exception ex) {
+                    return false;
+                }
+            }
+        }.execute();
+    }
+
+    private <T> void runWrite(String message, LockLease lease, RemoteCall<T> call,
+                              java.util.function.Consumer<T> onSuccess) {
+        busy = true;
+        status.setText(message);
+        updateSelection();
+        new SwingWorker<T, Void>() {
+            @Override protected T doInBackground() throws Exception {
+                return call.execute();
+            }
+            @Override protected void done() {
+                busy = false;
+                try {
+                    T result = get();
+                    boolean released = releaseLease(lease);
+                    clearLease(lease);
+                    onSuccess.accept(result);
+                    if (!released) {
+                        status.setText(status.getText() + " Khóa sẽ tự hết hạn sau một thời gian.");
+                    }
+                } catch (Exception ex) {
+                    showError(ex);
+                    activeWriteProductId = null;
+                    updateSelection();
+                }
+            }
+
+        }.execute();
+    }
+
+    private boolean releaseLease(LockLease lease) {
+        try {
+            client.locks().release(lease.lockToken(), clientId);
+            return true;
+        } catch (Exception ex) {
+            status.setText("Thao tác đã hoàn tất nhưng chưa giải phóng được phiên thao tác.");
+            return false;
+        }
+    }
+
+    private void clearLease(LockLease lease) {
+        if (currentLease == lease) currentLease = null;
+        if (activeWriteProductId != null
+                && (lease == null || activeWriteProductId.equals(lease.resourceId()))) {
+            activeWriteProductId = null;
+        }
     }
 
     private void updateSelection() {
         Product product = selectedProduct();
         productTitle.setText(product == null ? "Chưa chọn sản phẩm" :
-                product.productCode() + " - " + product.productName());
+                "<html><div style='width:220px'>" + escapeHtml(product.productCode())
+                        + "<br>" + escapeHtml(product.productName()) + "</div></html>");
         productDetails.setText(product == null ? "Chọn một dòng trong bảng." :
-                "Tồn kho: " + product.quantity() + "    |    Giá: " + product.price());
-        lockStatus.setText(currentLease == null ? "Khóa của bạn: chưa có" :
-                "Đang khóa: " + lockedProductCode() + " (đến " +
-                        DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault())
-                                .format(currentLease.expiresAt()) + ")");
+                "<html>Tồn kho: " + product.quantity() + "<br>Giá: "
+                        + NumberFormat.getNumberInstance(Locale.forLanguageTag("vi-VN"))
+                                .format(product.price()) + "</html>");
         boolean selected = product != null;
-        boolean ownsSelected = selected && currentLease != null
-                && currentLease.resourceId().equals(product.id());
-        lockButton.setEnabled(!busy && selected && currentLease == null);
-        addButton.setEnabled(!busy);
-        releaseButton.setEnabled(!busy && currentLease != null);
-        editButton.setEnabled(!busy && ownsSelected);
-        importButton.setEnabled(!busy && ownsSelected);
-        exportButton.setEnabled(!busy && ownsSelected);
-        deleteButton.setEnabled(!busy && ownsSelected);
+        boolean canWrite = !busy && activeWriteProductId == null && selected
+                && (currentLease == null || currentLease.resourceId().equals(product.id()));
+        addButton.setEnabled(!busy && activeWriteProductId == null);
+        editButton.setEnabled(canWrite);
+        importButton.setEnabled(canWrite);
+        exportButton.setEnabled(canWrite);
+        deleteButton.setEnabled(canWrite);
         historyButton.setEnabled(!busy && selected);
     }
 
-    private String lockedProductCode() {
-        for (Product product : products) {
-            if (product.id().equals(currentLease.resourceId())) return product.productCode();
-        }
-        return "sản phẩm khác";
+    private static String escapeHtml(String value) {
+        return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private <T> void runRemote(String message, RemoteCall<T> call, java.util.function.Consumer<T> onSuccess) {

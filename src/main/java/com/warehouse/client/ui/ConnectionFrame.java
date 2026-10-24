@@ -111,11 +111,14 @@ public final class ConnectionFrame extends JFrame {
     private void saveLastConnection(String address, int registryPort) {
         try {
             Properties properties = new Properties();
-            try (var input = java.nio.file.Files.newInputStream(configPath)) {
-                properties.load(input);
+            if (java.nio.file.Files.exists(configPath)) {
+                try (var input = java.nio.file.Files.newInputStream(configPath)) {
+                    properties.load(input);
+                }
             }
             properties.setProperty("server.host", address);
             properties.setProperty("rmi.registry.port", String.valueOf(registryPort));
+            properties.setProperty("client.id", config.clientId());
             NetworkAddress.saveProperties(configPath, properties);
         } catch (IOException e) {
             status.setText("Đã kết nối nhưng không lưu được IP gần nhất: " + e.getMessage());

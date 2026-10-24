@@ -1,9 +1,7 @@
 package com.warehouse.client;
 
 import com.warehouse.client.config.ClientConfig;
-import com.warehouse.client.rmi.WarehouseClient;
-import com.warehouse.client.ui.LoginFrame;
-import com.warehouse.client.ui.ConnectionFrame;
+import com.warehouse.client.ui.ClientAccessFrame;
 
 import javax.swing.*;
 import java.nio.file.Path;
@@ -11,13 +9,25 @@ import java.nio.file.Path;
 public final class ClientLauncher {
     public static void main(String[] args) throws Exception {
         com.warehouse.client.ui.AppTheme.install();
-        String configPath = args.length == 1 ? args[0] : System.getProperty("warehouse.config");
-        if (configPath == null || configPath.isBlank()) {
-            System.err.println("Usage: ClientLauncher <client.properties> or -Dwarehouse.config=<path>");
-            return;
+        String configPath = System.getProperty("warehouse.config");
+        String clientId = null;
+        for (String arg : args) {
+            if (arg.startsWith("--client-id=")) {
+                clientId = arg.substring("--client-id=".length());
+            } else if (arg.startsWith("--role=")) {
+                String role = arg.substring("--role=".length());
+                clientId = "b".equalsIgnoreCase(role) || "client-b".equalsIgnoreCase(role)
+                        ? "client-b" : "client-a";
+            } else if (!arg.startsWith("--")) {
+                configPath = arg;
+            }
         }
-        ClientConfig config = ClientConfig.load(configPath);
+        if (configPath == null || configPath.isBlank()) {
+            configPath = clientId != null && clientId.equals("client-b")
+                    ? "client-b.properties" : "client-a.properties";
+        }
+        ClientConfig config = ClientConfig.load(configPath).withClientId(clientId);
         Path path = Path.of(configPath);
-        SwingUtilities.invokeLater(() -> new ConnectionFrame(config, path).setVisible(true));
+        SwingUtilities.invokeLater(() -> new ClientAccessFrame(config, path).setVisible(true));
     }
 }

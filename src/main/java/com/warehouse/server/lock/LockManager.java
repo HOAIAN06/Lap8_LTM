@@ -155,12 +155,8 @@ public final class LockManager extends UnicastRemoteObject implements LockServic
     }
 
     private static boolean hasPendingSync(Connection connection, UUID id) throws SQLException {
-        try (PreparedStatement read = connection.prepareStatement(
-                "SELECT 1 FROM sync_events WHERE entity_id=? "
-                        + "AND sync_status IN ('PENDING','PROCESSING','FAILED') LIMIT 1")) {
-            read.setString(1, id.toString());
-            try (ResultSet row = read.executeQuery()) { return row.next(); }
-        }
+        // Đồng bộ trực tiếp qua Direct RMI diễn ra đồng thời (synchronous), không dùng hàng đợi outbox
+        return false;
     }
 
     private static LockLease lockByResource(Connection connection, UUID id) throws SQLException {

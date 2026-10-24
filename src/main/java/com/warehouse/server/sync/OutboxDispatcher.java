@@ -19,6 +19,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/**
+ * @deprecated Đã thay thế bằng Direct RMI Sync (đồng bộ trực tiếp qua SyncService RMI).
+ * Không còn được khởi chạy trong ServerLauncher.
+ */
+@Deprecated
 public final class OutboxDispatcher implements AutoCloseable {
     private static final Logger LOG = Logger.getLogger(OutboxDispatcher.class.getName());
     private final DataSource dataSource;

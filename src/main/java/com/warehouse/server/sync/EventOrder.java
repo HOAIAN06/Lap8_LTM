@@ -1,6 +1,9 @@
 package com.warehouse.server.sync;
 
-/** A receiver only advances a product one version at a time. */
+/**
+ * @deprecated Đã thay thế bằng Direct RMI Sync, nơi các thao tác được đồng bộ trực tiếp và tuần tự.
+ */
+@Deprecated
 public final class EventOrder {
     public enum Decision { APPLY, DEFER, CONFLICT }
     private EventOrder() { }

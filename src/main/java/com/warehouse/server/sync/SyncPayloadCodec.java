@@ -13,7 +13,11 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.UUID;
 
-/** JSON snapshot shared by the transactional outbox and its RMI receiver. */
+/**
+ * @deprecated Đã thay thế bằng Direct RMI Sync truyền trực tiếp Java Serializable DTOs (Product, InventoryTransaction).
+ * Không còn sử dụng JSON codec trong tiến trình chạy chính.
+ */
+@Deprecated
 public final class SyncPayloadCodec {
     public record ProductState(UUID id, String code, String name, String category, BigDecimal price,
                                int quantity, long version, long fencingToken, boolean deleted) { }
