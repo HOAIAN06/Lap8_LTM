@@ -1,4 +1,4 @@
-server.host=192.168.1.10
+server.host=
 rmi.registry.port=1099
 client.id=client-a
-client.username=employee1
+client.username=staff_a

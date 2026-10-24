@@ -15,11 +15,11 @@ public record ServerConfig(String serverId, String serverHost, int registryPort,
         try (InputStream in = Files.newInputStream(Path.of(file))) {
             p.load(in);
         }
-        return new ServerConfig(req(p, "server.id"), req(p, "server.host"),
+        return new ServerConfig(req(p, "server.id"), p.getProperty("server.host", "auto"),
                 integer(p, "rmi.registry.port", 1099), integer(p, "rmi.service.port", 1100),
-                req(p, "peer.server.host"), integer(p, "peer.rmi.port", 1099),
+                p.getProperty("peer.server.host", ""), integer(p, "peer.rmi.port", 1099),
                 req(p, "lock.coordinator.host"), integer(p, "lock.coordinator.port", 1099),
-                req(p, "db.url"), req(p, "db.username"), req(p, "db.password"),
+                req(p, "db.url"), req(p, "db.username"), p.getProperty("db.password", ""),
                 integer(p, "lock.lease.seconds", 30));
     }
 

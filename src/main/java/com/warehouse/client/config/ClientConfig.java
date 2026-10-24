@@ -10,7 +10,7 @@ public record ClientConfig(String serverHost, int registryPort, String clientId,
     public static ClientConfig load(String file) throws IOException {
         Properties p = new Properties();
         try (InputStream in = Files.newInputStream(Path.of(file))) { p.load(in); }
-        return new ClientConfig(required(p, "server.host"),
+        return new ClientConfig(p.getProperty("server.host", ""),
                 Integer.parseInt(p.getProperty("rmi.registry.port", "1099")),
                 required(p, "client.id"), p.getProperty("client.username", ""));
     }

@@ -1,13 +1,14 @@
+# Server A local example. Copy to server-a.properties and edit peer IP.
 server.id=server-a
-server.host=192.168.1.10
+server.host=auto
 rmi.registry.port=1099
 rmi.service.port=1100
-peer.server.host=192.168.1.11
+peer.server.host=
 peer.rmi.port=1099
-lock.coordinator.host=192.168.1.10
+lock.coordinator.host=auto
 lock.coordinator.port=1099
-db.url=jdbc:mysql://MYSQL_HOST:3306/warehouse_a?useSSL=true&serverTimezone=UTC
-db.username=replace-me
-db.password=replace-me
+db.url=jdbc:mariadb://127.0.0.1:3306/lap8_ltm
+db.username=root
+db.password=
 lock.lease.seconds=30
 sync.retry.delay.seconds=10

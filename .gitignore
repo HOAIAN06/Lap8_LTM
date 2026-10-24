@@ -28,6 +28,7 @@ bin/
 
 # Maven / runtime
 target/
+.m2repo/
 *.log
 *.local.properties
 .env
@@ -39,3 +40,4 @@ target/
 
 ### Mac OS ###
 .DS_Store
+.idea/

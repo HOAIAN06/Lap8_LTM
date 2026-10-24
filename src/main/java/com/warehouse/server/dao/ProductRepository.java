@@ -32,7 +32,7 @@ public final class ProductRepository {
 
     public Product find(Connection c, UUID id) throws SQLException {
         try (PreparedStatement ps = c.prepareStatement("SELECT * FROM products WHERE id=? FOR UPDATE")) {
-            ps.setObject(1, id);
+            ps.setString(1, id.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? map(rs) : null;
             }
@@ -43,7 +43,7 @@ public final class ProductRepository {
         UUID id = UUID.randomUUID();
         try (PreparedStatement ps = c.prepareStatement(
                 "INSERT INTO products(id,product_code,product_name,category,price) VALUES (?,?,?,?,?)")) {
-            ps.setObject(1, id); ps.setString(2, input.productCode()); ps.setString(3, input.productName());
+            ps.setString(1, id.toString()); ps.setString(2, input.productCode()); ps.setString(3, input.productName());
             ps.setString(4, input.category()); ps.setBigDecimal(5, input.price()); ps.executeUpdate();
         }
         return findById(c, id);
@@ -51,29 +51,33 @@ public final class ProductRepository {
 
     public Product update(Connection c, UUID id, ProductInput input, long fencing) throws SQLException {
         try (PreparedStatement ps = c.prepareStatement(
-                "UPDATE products SET product_name=?,category=?,price=?,version=version+1,last_fencing_token=?,updated_at=now() WHERE id=?")) {
+                "UPDATE products SET product_name=?,category=?,price=?,version=version+1,last_fencing_token=?,updated_at=now() "
+                        + "WHERE id=? AND NOT is_deleted AND last_fencing_token<=?")) {
             ps.setString(1, input.productName()); ps.setString(2, input.category()); ps.setBigDecimal(3, input.price());
-            ps.setLong(4, fencing); ps.setObject(5, id); ps.executeUpdate();
+            ps.setLong(4, fencing); ps.setString(5, id.toString()); ps.setLong(6, fencing);
+            if (ps.executeUpdate() != 1) return null;
         }
         return findById(c, id);
     }
 
     public void softDelete(Connection c, UUID id, long fencing) throws SQLException {
         try (PreparedStatement ps = c.prepareStatement(
-                "UPDATE products SET is_deleted=true,version=version+1,last_fencing_token=?,updated_at=now() WHERE id=?")) {
-            ps.setLong(1, fencing); ps.setObject(2, id); ps.executeUpdate();
+                "UPDATE products SET is_deleted=true,version=version+1,last_fencing_token=?,updated_at=now() "
+                        + "WHERE id=? AND NOT is_deleted AND last_fencing_token<=?")) {
+            ps.setLong(1, fencing); ps.setString(2, id.toString()); ps.setLong(3, fencing);
+            if (ps.executeUpdate() != 1) throw new SQLException("Product not found or fencing token is stale");
         }
     }
 
     public Product findById(Connection c, UUID id) throws SQLException {
         try (PreparedStatement ps = c.prepareStatement("SELECT * FROM products WHERE id=?")) {
-            ps.setObject(1, id);
+            ps.setString(1, id.toString());
             try (ResultSet rs = ps.executeQuery()) { return rs.next() ? map(rs) : null; }
         }
     }
 
     private Product map(ResultSet rs) throws SQLException {
-        return new Product(rs.getObject("id", UUID.class), rs.getString("product_code"),
+        return new Product(UUID.fromString(rs.getString("id")), rs.getString("product_code"),
                 rs.getString("product_name"), rs.getString("category"), rs.getBigDecimal("price"),
                 rs.getInt("quantity"), rs.getLong("version"), rs.getLong("last_fencing_token"),
                 rs.getBoolean("is_deleted"), rs.getTimestamp("updated_at").toInstant());
